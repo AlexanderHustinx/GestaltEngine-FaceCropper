@@ -51,8 +51,8 @@ parser.add_argument('--save_image_verbose', action="store_true", default=False,
                     help='save intermediate detection results')
 parser.add_argument('--use_subdirectories', action="store_true", default=False,
                     help='When set saves in dirs in the "images_dir"')
-parser.add_argument('--crop_size', type=int, default=100,
-                    help='Desired width and height of the resulting cropped face (default = 100)')
+parser.add_argument('--crop_size', type=int, default=0,
+                    help='Desired width and height of the resulting cropped face, if 0 crops to actual bounding box (default = 0)')
 parser.add_argument('--result_type', default='crop', type=str,
                     help="Desired result type from pipeline, options: \'crop\' and \'coords\' (default: \'crop\')")
 parser.add_argument('--fill_color', default=0.5,
@@ -146,7 +146,11 @@ def rotate_image(image, landmarks):
 
 def resize_square_aspect(img, desired_size=100):
     old_size = img.size  # (width, height)
-
+    
+    # we crop without resize if desired_size == 0
+    if desired_size == 0:
+        desired_size = max(old_size)
+    
     ratio = float(desired_size) / max(old_size)
     new_size = tuple([int(x * ratio) for x in old_size])
 
@@ -162,7 +166,11 @@ def resize_square_aspect(img, desired_size=100):
 
 def resize_square_aspect_cv2(img, desired_size=100):
     old_size = img.shape[0:2]  # (width, height)
-
+    
+    # we crop without resize if desired_size == 0
+    if desired_size == 0:
+        desired_size = max(old_size)
+        
     ratio = float(desired_size) / max(old_size)
     new_size = [int(x * ratio) for x in old_size]
     new_size = tuple(new_size[::-1])
@@ -277,7 +285,8 @@ if __name__ == '__main__':
                 else:
                     img_raw = cv2.imread(img_path)
                 # Note: Be aware of possible size increase (followed by decrease) that can damage the image quality
-                img_raw = resize_square_aspect_cv2(img_raw, 400)
+                img_raw = resize_square_aspect_cv2(img_raw, 0)
+                #img_raw = resize_square_aspect_cv2(img_raw, 400)
             else:
                 # Use the rotated image as input for the detector
                 img_raw = img_rot
@@ -368,9 +377,13 @@ if __name__ == '__main__':
                     img_rot = TF.to_pil_image(img_rot)
                     img_crop = img_rot.crop((b[0], b[1], b[2], b[3]))
 
-                    # create squared rotated crop
-                    img_square_crop = img_crop.resize((args.crop_size, args.crop_size))
+                    # create squared rotated crop (if crop_size == 0, we don't resize)
+                    if args.crop_size != 0:
+                        img_square_crop = img_crop.resize((args.crop_size, args.crop_size))
+                    else:
+                        img_square_crop = img_crop
                     img_square_crop = np.ascontiguousarray(img_square_crop)
+                    
                     if args.result_type == 'crop':
                         cv2.imwrite(
                             f"{save_dir}/{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}crop_square.jpg",
