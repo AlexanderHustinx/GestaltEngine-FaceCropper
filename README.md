@@ -17,7 +17,7 @@ The following command line arguments you can select some relevant settings (more
 
 Running the code with the following settings will look for the `images_dir` in a data-directory and look for a single face in each image that is in the `images_dir` directory, not including subdirectories:
 ```shell
-python detect_pipe.py --images_dir ../data/GestaltMatcherDB/images/ --save_dir ../data/GestaltMatcherDB/images_cropped/ 
+python detect_pipe.py --images_dir ../data/GestaltMatcherDB/images/ --save_dir ../data/GestaltMatcherDB/images_cropped/ --crop_size 100
 ```
 The resulting detection are square cropped to 100x100 and saved in the `save_dir` directory.
 
