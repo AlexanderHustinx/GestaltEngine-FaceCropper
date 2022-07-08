@@ -146,11 +146,11 @@ def rotate_image(image, landmarks):
 
 def resize_square_aspect(img, desired_size=100):
     old_size = img.size  # (width, height)
-    
+
     # we crop without resize if desired_size == 0
     if desired_size == 0:
         desired_size = max(old_size)
-    
+
     ratio = float(desired_size) / max(old_size)
     new_size = tuple([int(x * ratio) for x in old_size])
 
@@ -164,13 +164,18 @@ def resize_square_aspect(img, desired_size=100):
     return new_img
 
 
+# TODO: try/catch OOM-error?
 def resize_square_aspect_cv2(img, desired_size=100):
     old_size = img.shape[0:2]  # (width, height)
-    
+
     # we crop without resize if desired_size == 0
     if desired_size == 0:
         desired_size = max(old_size)
-        
+
+        # Too large images can cause an OOM-error, hopefully this addresses that...
+        if (desired_size[0]*desired_size[1]) > 10000000:
+            desired_size = 2000 # should be large enough
+
     ratio = float(desired_size) / max(old_size)
     new_size = [int(x * ratio) for x in old_size]
     new_size = tuple(new_size[::-1])
@@ -285,7 +290,7 @@ if __name__ == '__main__':
                 else:
                     img_raw = cv2.imread(img_path)
                 # Note: Be aware of possible size increase (followed by decrease) that can damage the image quality
-                img_raw = resize_square_aspect_cv2(img_raw, 0)
+                img_raw = resize_square_aspect_cv2(img_raw, 0) #Note: some images are too big resulting in an OOM-error
                 #img_raw = resize_square_aspect_cv2(img_raw, 400)
             else:
                 # Use the rotated image as input for the detector
@@ -383,7 +388,7 @@ if __name__ == '__main__':
                     else:
                         img_square_crop = img_crop
                     img_square_crop = np.ascontiguousarray(img_square_crop)
-                    
+
                     if args.result_type == 'crop':
                         cv2.imwrite(
                             f"{save_dir}/{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}crop_square.jpg",
