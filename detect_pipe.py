@@ -173,8 +173,8 @@ def resize_square_aspect_cv2(img, desired_size=100):
         desired_size = max(old_size)
 
         # Too large images can cause an OOM-error, hopefully this addresses that...
-        if (desired_size[0]*desired_size[1]) > 10000000:
-            desired_size = 2000 # should be large enough
+        if (old_size[0]*old_size[1]) > 10000000:
+            desired_size = 2000     # should be large enough
 
     ratio = float(desired_size) / max(old_size)
     new_size = [int(x * ratio) for x in old_size]
@@ -250,10 +250,10 @@ if __name__ == '__main__':
     # List containing the file names of all images that were skipped due to incorrect face orientation
     missed_images = []
 
-    ## If model freezes somewhere halfway.. use this snippet to continue from that point
+    # # If model freezes somewhere halfway.. use this snippet to continue from that point
     # start_idx = -1
-    # for idx in range(len(test)):
-    #     if '/1750737' in test[idx]: #index where it froze
+    # for idx in range(len(img_names)):
+    #     if '\\6642.' in img_names[idx]:   # index where it froze
     #         start_idx = idx
     #         break
     # print(start_idx)
