@@ -18,6 +18,8 @@ import argparse
 import torch
 import torch.backends.cudnn as cudnn
 import numpy as np
+from matplotlib import pyplot as plt
+
 from data import cfg_mnet, cfg_re50
 from layers.functions.prior_box import PriorBox
 from utils.nms.py_cpu_nms import py_cpu_nms
@@ -50,12 +52,14 @@ parser.add_argument('--save_dir_verbose', default="./examples_verbose/", help='W
 parser.add_argument('--save_image_verbose', action="store_true", default=False,
                     help='save intermediate detection results')
 parser.add_argument('--use_subdirectories', action="store_true", default=False,
-                    help='When set saves in dirs in the "images_dir"')
+                    help='When set saves images in dirs in the "images_dir" (e.g. for CASIA)')
+parser.add_argument('--check_orientation', action="store_true", default=False,
+                    help='When set checks the orientation of the detected face, skipping it if too extreme')
 parser.add_argument('--crop_size', type=int, default=0,
                     help='Desired width and height of the resulting cropped face, if 0 crops to actual bounding box (default = 0)')
 parser.add_argument('--result_type', default='crop', type=str,
                     help="Desired result type from pipeline, options: \'crop\' and \'coords\' (default: \'crop\')")
-parser.add_argument('--fill_color', default=0.5,
+parser.add_argument('--fill_color', type=float, default=0.5,
                     help="Color (float) that will be used to fill in the expanded regions after rotation (default: 0.5)")
 
 args = parser.parse_args()
@@ -135,13 +139,13 @@ def rotate_image(image, landmarks):
     rot_mat = cv2.getRotationMatrix2D(tuple(nose), angle_degrees, 1.0)
 
     # Background fill color is set to 0.5 to 0 when centered around [-1,1]
-    fill = int(args.fill_color * 256)
+    fill = int(args.fill_color * 255)
     result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR, borderValue=(fill,fill,fill))
 
     # plt.imshow(result)
     # plt.show()
 
-    return result
+    return result, angle_degrees
 
 
 def resize_square_aspect(img, desired_size=100):
@@ -165,7 +169,9 @@ def resize_square_aspect(img, desired_size=100):
 
 
 # TODO: try/catch OOM-error?
-def resize_square_aspect_cv2(img, desired_size=100):
+# TODO: This doesn't work as the images are too big (trained on 640x640), so we should shrink the image first
+#       get the locations and rescale them to the original size, finally crop to those dimensions of the original image
+def resize_square_aspect_cv2(img, desired_size=640):
     old_size = img.shape[0:2]  # (width, height)
 
     # we crop without resize if desired_size == 0
@@ -242,9 +248,9 @@ if __name__ == '__main__':
     coords_file = None
     if args.result_type == 'coords':
         os.makedirs(f"{args.save_dir}", exist_ok=True)
-        coords_file = open(f"{args.save_dir}face_coords.csv", 'w+')  # open file in override mode
-        coords_file.write('img,x1,y1,x2,y2\n')
-        print("Created \'coords.csv\' file to store the bounding box coords of the detected faces (on rotated images)")
+        coords_file = open(f"{args.save_dir}_face_coords.csv", 'w+')  # open file in override mode
+        coords_file.write('img,bbox_x1,bbox_y1,bbox_x2,bbox_y2,kp1_x,kp1_y,kp2_x,kp2_y,kp3_x,kp3_y,kp4_x,kp4_y,kp5_x,kp5_y\n')
+        print(f"Created \'{args.save_dir}_face_coords.csv\' file to store the bounding box coords of the detected faces (on rotated images)")
     img_names = [y for x in os.walk(source_dir) for y in glob(os.path.join(x[0], '*.*'))]
 
     # List containing the file names of all images that were skipped due to incorrect face orientation
@@ -263,6 +269,7 @@ if __name__ == '__main__':
         save_dir = f"{args.save_dir}"
         save_dir_verbose = f"{args.save_dir_verbose}"
 
+        subdir_name = ''
         if args.use_subdirectories:
             subdir_name = (img_path.split('/')[-1]).split('\\')[0]
             save_dir = f"{save_dir}/{subdir_name}"
@@ -285,16 +292,18 @@ if __name__ == '__main__':
                 # *.gif format is not supported by cv.imread(..)
                 if img_path.split('.')[-1] == "gif":
                     cap = cv2.VideoCapture(img_path)
-                    ret, img_raw = cap.read()
+                    ret, img_raw_original = cap.read()
                     cap.release()
                 else:
-                    img_raw = cv2.imread(img_path)
+                    img_raw_original = cv2.imread(img_path)
+
                 # Note: Be aware of possible size increase (followed by decrease) that can damage the image quality
-                img_raw = resize_square_aspect_cv2(img_raw, 0) #Note: some images are too big resulting in an OOM-error
-                #img_raw = resize_square_aspect_cv2(img_raw, 400)
+                original_size = img_raw_original.shape[0:2]
+                img_raw = resize_square_aspect_cv2(img_raw_original, 640) #Note: some images are too big resulting in an OOM-error
             else:
                 # Use the rotated image as input for the detector
                 img_raw = img_rot
+                img_raw_original = img_original_rot
 
             img = np.float32(img_raw)
 
@@ -362,31 +371,39 @@ if __name__ == '__main__':
             # show image
             if args.save_image:
                 for idx, b in enumerate(dets):
+                    # scale b back to original input size
+                    b_scaled = b * float(max(original_size)) / max(img_raw.shape[0:2])
 
                     # Rotate the image to have the most confident detection's orientation corrected
                     if first:
-                        img_rot = rotate_image(img_raw, b)
+                        img_rot, rotation_angle_first = rotate_image(img_raw, b)
+                        img_original_rot, _ = rotate_image(img_raw_original, b_scaled)
                         continue
 
-                    # # Check if the orientation of the face is correct: i.e. rear or frontal facing
-                    # if not is_correct_orientation(b):
-                    #     missed_images.append(img_name)
-                    #     continue
+                    # Check if the orientation of the face is correct: i.e. rear or frontal facing
+                    if args.check_orientation:
+                        if not is_correct_orientation(b):
+                            missed_images.append(img_name)
+                            continue
 
                     if args.result_type == 'coords':
-                        d = list(map(int, b))
-                        coords_file.write(f"{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}rot.jpg,"
-                                          f"{str(d[0:4]).replace('[','').replace(']','').replace(' ','')}\n")
+                        #d = list(map(int, b))
+                        d = list(map(int, b_scaled))
+                        coords_file.write(f"{f'{subdir_name}/' if args.use_subdirectories else ''}{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}rot.jpg,"
+                                          f"{str(d[0:4]+d[5::]).replace('[','').replace(']','').replace(' ','')}\n")
 
                     # Attempt to crop relevant face box
                     img_rot = TF.to_pil_image(img_rot)
                     img_crop = img_rot.crop((b[0], b[1], b[2], b[3]))
 
+                    img_original_rot = TF.to_pil_image(img_original_rot)
+                    img_original_crop = img_original_rot.crop((b_scaled[0], b_scaled[1], b_scaled[2], b_scaled[3]))
+
                     # create squared rotated crop (if crop_size == 0, we don't resize)
                     if args.crop_size != 0:
                         img_square_crop = img_crop.resize((args.crop_size, args.crop_size))
                     else:
-                        img_square_crop = img_crop
+                        img_square_crop = img_original_crop
                     img_square_crop = np.ascontiguousarray(img_square_crop)
 
                     if args.result_type == 'crop':
@@ -402,7 +419,7 @@ if __name__ == '__main__':
                     img_square_padded_crop = resize_square_aspect(img_crop, args.crop_size)
 
                     # Save rotated image (not verbose when it's the desired result type)
-                    img_rot = np.ascontiguousarray(img_rot)
+                    img_rot = np.ascontiguousarray(img_original_rot)
                     if args.result_type == 'coords':
                         cv2.imwrite(
                             f"{save_dir}/{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}rot.jpg",
@@ -445,6 +462,11 @@ if __name__ == '__main__':
                         cv2.circle(img_raw, (b[9], b[10]), 1, (255, 0, 255), 4)
                         cv2.circle(img_raw, (b[11], b[12]), 1, (0, 255, 0), 4)
                         cv2.circle(img_raw, (b[13], b[14]), 1, (255, 0, 0), 4)
+
+                        # plt.close()
+                        # plt.imshow(img_raw)
+                        # plt.waitforbuttonpress()
+                        # exit()
 
                 # save verbose image?
                 if args.save_image_verbose:
