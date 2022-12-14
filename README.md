@@ -23,7 +23,11 @@ The resulting detection are square cropped to 100x100 and saved in the `save_dir
 
 In the future this repository will be updated with new branches when different face detectors are used. 
 
+The face cropper requires the model-weights "Resnet50_Final.pth". Remember to download them from 
+[Google Docs](https://drive.google.com/open?id=1oZRSG0ZegbVkVwUd8wUIQx8W7yfZ_ki1) with pw: fstq 
+
 Below you can find more information from the original repository w.r.t. installation, performance, etc. of the model.
+
 
 ---
 
