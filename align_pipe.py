@@ -82,40 +82,46 @@ if __name__ == '__main__':
 
     # Read coords file and get image names
     coords_file = pd.read_csv(args.coords_file)
-    img_names = [y for x in os.walk(source_dir) for y in glob(os.path.join(x[0], '*.*'))][::-1]
+    img_names = [y for x in os.walk(source_dir) for y in glob(os.path.join(x[0], '*.*'))]
+
+    # attempt to remove <save_dir>/<save_file> from the list of image names to loop through
+    for idx, i in enumerate(img_names):
+        if ".csv" in i:
+            img_names.pop(idx)
 
     # List containing the file names of all images that were skipped due to incorrect face orientation
     missed_images = []
 
     for img_path in img_names:
-        save_dir = f"{args.save_dir}"
-        save_dir_verbose = f"{args.save_dir_verbose}"
+        save_dir = args.save_dir
+        save_dir_verbose = args.save_dir_verbose
 
         subdir_name = ''
         if args.use_subdirectories:
-            subdir_name = (img_path.split('/')[-1]).split('\\')[0]
-            save_dir = f"{save_dir}/{subdir_name}"
-            save_dir_verbose = f"{save_dir_verbose}/{subdir_name}"
+            subdir_name = os.path.split(os.path.split(img_path)[-2])[-1]
+            save_dir = os.path.join(save_dir, subdir_name)
+            save_dir_verbose = os.path.join(save_dir_verbose, subdir_name)
             print(save_dir)
 
-        os.makedirs(f"{save_dir}", exist_ok=True)
+        os.makedirs(save_dir, exist_ok=True)
         if args.save_image_verbose:
-            os.makedirs(f"{save_dir_verbose}", exist_ok=True)
+            os.makedirs(save_dir_verbose, exist_ok=True)
 
-        img_name = (img_path.split('\\')[-1]).split('.')[0]
+        img_name = os.path.splitext(os.path.basename(img_path))[0]
 
         ## Run the alignment for each image
 
         # load image
         print(img_path)
         # *.gif format is not supported by cv.imread(..)
-        if img_path.split('.')[-1] == "gif":
+        if os.path.splitext(img_path) == ".gif":
             cap = cv2.VideoCapture(img_path)
             ret, img = cap.read()
             cap.release()
         else:
             img = cv2.imread(img_path)
 
+        # TODO: This might still need to be changed to os.path.x(..)
         # get coords into (5,2)-shape
         coords = coords_file[coords_file.img == f"{f'{subdir_name}/' if args.use_subdirectories else ''}{img_name}.jpg"].values[0,5::]
         coords = coords.reshape((5,2)).astype(float)
@@ -124,4 +130,4 @@ if __name__ == '__main__':
         aligned_img = norm_crop(img, coords)
 
         # save image
-        cv2.imwrite(f"{save_dir}/{img_name}_aligned.jpg", aligned_img)
+        cv2.imwrite(os.path.join(save_dir, f"{img_name}_aligned.jpg"), aligned_img)

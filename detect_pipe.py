@@ -12,8 +12,6 @@ from __future__ import print_function
 from glob import glob
 
 import os
-from os.path import splitext
-from os import listdir
 import argparse
 import torch
 import torch.backends.cudnn as cudnn
@@ -48,6 +46,8 @@ parser.add_argument('--multiple_per_image', action="store_true", default=False,
                     help='Use when image contains multiple faces (Not recommended...)')
 parser.add_argument('--images_dir', default="./examples/", help='Location of the images to run detector on')
 parser.add_argument('--save_dir', default="./images_cropped/", help='Where the detections are saved')
+parser.add_argument('--save_file', default="face_coords.csv", help='Desired filename of the coords file, to be '
+                                                                       'saved in the --save_dir')
 parser.add_argument('--save_dir_verbose', default="./examples_verbose/", help='Where the verbose images are saved')
 parser.add_argument('--save_image_verbose', action="store_true", default=False,
                     help='save intermediate detection results')
@@ -247,11 +247,17 @@ if __name__ == '__main__':
 
     coords_file = None
     if args.result_type == 'coords':
-        os.makedirs(f"{args.save_dir}", exist_ok=True)
-        coords_file = open(f"{args.save_dir}_face_coords.csv", 'w+')  # open file in override mode
+        os.makedirs(args.save_dir, exist_ok=True)
+        coords_file = open(os.path.join(args.save_dir, args.save_file), 'w+')  # open file in override mode
         coords_file.write('img,bbox_x1,bbox_y1,bbox_x2,bbox_y2,kp1_x,kp1_y,kp2_x,kp2_y,kp3_x,kp3_y,kp4_x,kp4_y,kp5_x,kp5_y\n')
-        print(f"Created \'{args.save_dir}_face_coords.csv\' file to store the bounding box coords of the detected faces (on rotated images)")
+        print(f"Created \'{os.path.join(args.save_dir, args.save_file)}' file to store the bounding box coords of "
+              f"the detected faces (on rotated images)")
     img_names = [y for x in os.walk(source_dir) for y in glob(os.path.join(x[0], '*.*'))]
+
+    # attempt to remove <save_dir>/<save_file> from the list of image names to loop through
+    for idx, i in enumerate(img_names):
+        if ".csv" in i:
+            img_names.pop(idx)
 
     # List containing the file names of all images that were skipped due to incorrect face orientation
     missed_images = []
@@ -266,21 +272,21 @@ if __name__ == '__main__':
     # img_names = img_names[start_idx-1::]
 
     for img_path in img_names:
-        save_dir = f"{args.save_dir}"
-        save_dir_verbose = f"{args.save_dir_verbose}"
+        save_dir = args.save_dir
+        save_dir_verbose = args.save_dir_verbose
 
         subdir_name = ''
         if args.use_subdirectories:
-            subdir_name = (img_path.split('/')[-1]).split('\\')[0]
-            save_dir = f"{save_dir}/{subdir_name}"
-            save_dir_verbose = f"{save_dir_verbose}/{subdir_name}"
+            subdir_name = os.path.split(os.path.split(img_path)[-2])[-1]
+            save_dir = os.path.join(save_dir, subdir_name)
+            save_dir_verbose = os.path.join(save_dir_verbose, subdir_name)
             print(save_dir)
 
-        os.makedirs(f"{save_dir}", exist_ok=True)
+        os.makedirs(save_dir, exist_ok=True)
         if args.save_image_verbose:
-            os.makedirs(f"{save_dir_verbose}", exist_ok=True)
+            os.makedirs(save_dir_verbose, exist_ok=True)
 
-        img_name = (img_path.split('\\')[-1]).split('.')[0]
+        img_name = os.path.splitext(os.path.basename(img_path))[0]
 
         # We'll run the detection twice:
         #    first: Correct the image rotation
@@ -288,9 +294,9 @@ if __name__ == '__main__':
         first = True
         for i in range(2):
             if first:
-                print(img_path)
+                print(f"\t{img_path}")
                 # *.gif format is not supported by cv.imread(..)
-                if img_path.split('.')[-1] == "gif":
+                if os.path.splitext(img_path) == ".gif":
                     cap = cv2.VideoCapture(img_path)
                     ret, img_raw_original = cap.read()
                     cap.release()
@@ -387,7 +393,6 @@ if __name__ == '__main__':
                             continue
 
                     if args.result_type == 'coords':
-                        #d = list(map(int, b))
                         d = list(map(int, b_scaled))
                         coords_file.write(f"{f'{subdir_name}/' if args.use_subdirectories else ''}{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}rot.jpg,"
                                           f"{str(d[0:4]+d[5::]).replace('[','').replace(']','').replace(' ','')}\n")
@@ -408,11 +413,16 @@ if __name__ == '__main__':
 
                     if args.result_type == 'crop':
                         cv2.imwrite(
-                            f"{save_dir}/{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}crop_square.jpg",
+                            os.path.join(
+                                save_dir,
+                                f"{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}crop_square.jpg"),
                             img_square_crop)
+
                     elif args.result_type == 'coords' and args.save_image_verbose:
                         cv2.imwrite(
-                            f"{save_dir_verbose}/{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}crop_square.jpg",
+                            os.path.join(
+                                save_dir_verbose,
+                                f"{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}crop_square.jpg"),
                             img_square_crop)
 
                     # create (aspect ratio) squared rotated crop padded with black pixels
@@ -422,29 +432,37 @@ if __name__ == '__main__':
                     img_rot = np.ascontiguousarray(img_original_rot)
                     if args.result_type == 'coords':
                         cv2.imwrite(
-                            f"{save_dir}/{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}rot.jpg",
+                            os.path.join(
+                                save_dir,
+                                f"{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}rot.jpg"),
                             img_rot)
+
                     # Save intermediate verbose images (rots, crops, boxes, etc.)
                     if args.save_image_verbose:
                         # save rotated detection
-
                         if args.result_type == 'crop':
                             cv2.imwrite(
-                                f"{save_dir_verbose}/{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}rot.jpg",
+                                os.path.join(
+                                    save_dir_verbose,
+                                    f"{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}rot.jpg"),
                                 img_rot)
 
                         # save square cropped and padded detection
                         img_square_padded_crop = np.ascontiguousarray(img_square_padded_crop)
                         cv2.imwrite(
-                            f"{save_dir_verbose}/{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}"
-                            f"crop_square_padded.jpg", img_square_padded_crop)
+                            os.path.join(
+                                save_dir_verbose,
+                                f"{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}"
+                                f"crop_square_padded.jpg"),
+                            img_square_padded_crop)
 
                         # save crop
                         img_crop = np.ascontiguousarray(img_crop)
                         cv2.imwrite(
-                            f"{save_dir_verbose}/{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}"
-                            f"crop.jpg", img_crop)
-
+                            os.path.join(
+                                save_dir_verbose,
+                                f"{img_name}_{str(idx) + '_' if args.multiple_per_image else ''}crop.jpg"),
+                            img_crop)
 
                         img_raw = np.ascontiguousarray(img_raw)
 
@@ -470,8 +488,11 @@ if __name__ == '__main__':
 
                 # save verbose image?
                 if args.save_image_verbose:
-                    cv2.imwrite(f"{save_dir_verbose}/{img_name}{'_' + str(idx) if args.multiple_per_image else ''}.jpg"
-                                , img_raw)
+                    cv2.imwrite(
+                        os.path.join(
+                            save_dir_verbose,
+                            f"{img_name}{'_' + str(idx) if args.multiple_per_image else ''}.jpg"),
+                        img_raw)
 
             first = not first
 
